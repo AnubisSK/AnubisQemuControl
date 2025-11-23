@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnubisQemuControl</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-dark-bg text-dark-text">
+<!-- Top Menu Bar -->
+<div class="bg-dark-surface border-b border-dark-border">
+    <div class="flex items-center justify-between px-4 py-2">
+        <div class="flex items-center space-x-4">
+            <h1 class="text-xl font-bold text-dark-accent">AnubisQemuControl</h1>
+            <div class="flex space-x-2">
+                <button id="btnNewVM" class="px-3 py-1 bg-dark-accent hover:bg-dark-accentHover rounded text-sm">
+                    Nová VM
+                </button>
+                <button id="btnNewAndroidVM" class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm">
+                    🤖 Android VM
+                </button>
+                <button id="btnSettings" class="px-3 py-1 bg-dark-surface2 hover:bg-dark-border rounded text-sm">
+                    Nastavenia
+                </button>
+                <button id="btnAbout" class="px-3 py-1 bg-dark-surface2 hover:bg-dark-border rounded text-sm">
+                    O aplikácii
+                </button>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+                <span id="qemuStatus" class="text-xs px-2 py-1 rounded bg-dark-surface2">
+                    Kontrola QEMU...
+                </span>
+            <span id="runningVMsCount" class="text-xs px-2 py-1 rounded bg-green-600 text-white hidden">
+                    Bežiace VM: <span id="runningVMsCountNumber">0</span>
+                </span>
+        </div>
+    </div>
+</div>
+
+<div class="flex h-[calc(100vh-50px)]">
+    <!-- Left Sidebar - VM List -->
+    <div class="w-64 bg-dark-surface border-r border-dark-border overflow-y-auto">
+        <div class="p-4">
+            <h2 class="text-sm font-semibold text-dark-text2 uppercase mb-3">Virtuálne stroje</h2>
+            <div id="vmList" class="space-y-2 mb-4">
+                <!-- VM items will be added here dynamically -->
+            </div>
+
+            <!-- Running VMs Summary -->
+            <div id="runningVMsSummary" class="mt-4 pt-4 border-t border-dark-border hidden">
+                <h3 class="text-xs font-semibold text-dark-text2 uppercase mb-2">Bežiace VM</h3>
+                <div id="runningVMsList" class="space-y-1">
+                    <!-- Running VM items will be added here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col">
+        <!-- Toolbar -->
+        <div class="bg-dark-surface2 border-b border-dark-border px-4 py-2">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2" id="vmToolbar" style="display: none;">
+                    <button id="btnStart" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm font-medium">
+                        ▶ Spustiť
+                    </button>
+                    <button id="btnStop" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm font-medium" disabled>
+                        ⏹ Zastaviť
+                    </button>
+                    <button id="btnRestart" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm font-medium" disabled>
+                        🔄 Reštartovať
+                    </button>
+                    <div class="w-px h-6 bg-dark-border mx-2"></div>
+                    <button id="btnEdit" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded text-sm">
+                        ✏️ Upraviť
+                    </button>
+                    <button id="btnDelete" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm">
+                        🗑️ Vymazať
+                    </button>
+                    <button id="btnClone" class="px-4 py-2 bg-dark-surface hover:bg-dark-border rounded text-sm">
+                        📋 Klónovať
+                    </button>
+                </div>
+                <div id="emptyState" class="text-dark-text2 text-sm">
+                    Vyberte VM alebo vytvorte novú
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Panel -->
+        <div class="flex-1 overflow-y-auto p-6">
+            <!-- Empty State -->
+            <div id="emptyContent" class="flex flex-col items-center justify-center h-full">
+                <div class="text-center">
+                    <div class="text-6xl mb-4">🖥️</div>
+                    <h2 class="text-2xl font-bold mb-2">Vitajte v AnubisQemuControl</h2>
+                    <p class="text-dark-text2 mb-6">Vytvorte svoju prvú virtuálnu mašinu alebo vyberte existujúcu</p>
+                    <div class="flex space-x-3">
+                        <button id="btnNewVMEmpty" class="px-6 py-3 bg-dark-accent hover:bg-dark-accentHover rounded-lg font-medium">
+                            Vytvoriť novú VM
+                        </button>
+                        <button id="btnNewAndroidVMEmpty" class="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium">
+                            🤖 Vytvoriť Android VM
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VM Details Panel -->
+            <div id="vmDetails" class="hidden">
+                <div class="grid grid-cols-2 gap-6">
+                    <!-- General Info -->
+                    <div class="bg-dark-surface rounded-lg p-4 border border-dark-border">
+                        <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Všeobecné informácie</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="text-sm text-dark-text2">Názov:</label>
+                                <div id="vmName" class="text-base font-medium mt-1">-</div>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">Stav:</label>
+                                <div id="vmStatus" class="text-base mt-1">
+                                    <span class="px-2 py-1 rounded text-xs bg-gray-600">Zastavené</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">Typ:</label>
+                                <div id="vmType" class="text-base mt-1">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Resources -->
+                    <div class="bg-dark-surface rounded-lg p-4 border border-dark-border">
+                        <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Systémové zdroje</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="text-sm text-dark-text2">RAM:</label>
+                                <div id="vmMemory" class="text-base mt-1">-</div>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">CPU:</label>
+                                <div id="vmCPU" class="text-base mt-1">-</div>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">Disk:</label>
+                                <div id="vmDisk" class="text-base mt-1">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Storage -->
+                    <div class="bg-dark-surface rounded-lg p-4 border border-dark-border">
+                        <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Úložisko</h3>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="text-sm text-dark-text2">Disk Image:</label>
+                                <div id="vmDiskImage" class="text-sm mt-1 break-all">-</div>
+                                <div id="vmDiskSize" class="text-xs text-dark-text2 mt-1">-</div>
+                                <button id="btnResizeDisk" class="mt-2 px-3 py-1 bg-dark-accent hover:bg-dark-accentHover rounded text-xs hidden">
+                                    🔧 Zmeniť veľkosť disku
+                                </button>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">CD/DVD:</label>
+                                <div id="vmCDROM" class="text-sm mt-1 break-all">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Network -->
+                    <div class="bg-dark-surface rounded-lg p-4 border border-dark-border">
+                        <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Sieť</h3>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="text-sm text-dark-text2">Typ:</label>
+                                <div id="vmNetworkType" class="text-sm mt-1">-</div>
+                            </div>
+                            <div>
+                                <label class="text-sm text-dark-text2">VNC Port:</label>
+                                <div id="vmVNCPort" class="text-sm mt-1">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Drivers -->
+                    <div class="bg-dark-surface rounded-lg p-4 border border-dark-border">
+                        <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Ovladače</h3>
+                        <div class="space-y-2">
+                            <div id="vmVirtioStatus" class="text-sm text-dark-text2">
+                                VirtIO ovladače nie sú pripojené
+                            </div>
+                            <button id="btnDownloadVirtio" class="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium">
+                                📥 Stiahnuť a pripojiť VirtIO ovladače
+                            </button>
+                            <p class="text-xs text-dark-text2 mt-2">
+                                VirtIO ovladače zlepšujú výkon VM (disky, sieť). Odporúčané pre Windows VM.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QEMU Arguments (shown when VM is running) -->
+                <div id="vmQemuArgsPanel" class="mt-6 bg-dark-surface rounded-lg p-4 border border-dark-border hidden">
+                    <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">QEMU Argumenty</h3>
+                    <div class="space-y-2">
+                        <div>
+                            <label class="text-sm text-dark-text2">Použité argumenty:</label>
+                            <div id="vmQemuArgs" class="text-xs font-mono bg-dark-bg rounded p-2 mt-1 break-all max-h-32 overflow-y-auto">-</div>
+                        </div>
+                        <button id="btnCopyQemuArgs" class="mt-2 px-3 py-1 bg-dark-accent hover:bg-dark-accentHover rounded text-xs">
+                            📋 Kopírovať príkaz
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VM Display (Embedded VNC) -->
+                <div id="vmDisplayPanel" class="mt-6 bg-dark-surface rounded-lg p-4 border border-dark-border hidden">
+                    <div class="flex items-center justify-between mb-4 pb-2 border-b border-dark-border">
+                        <h3 class="text-lg font-semibold">Zobrazenie VM</h3>
+                        <button id="btnFullscreenDisplay" class="px-3 py-1 bg-dark-accent hover:bg-dark-accentHover rounded text-sm">
+                            ⛶ Celá obrazovka
+                        </button>
+                    </div>
+                    <div id="vmDisplayContainer" class="bg-dark-bg rounded border border-dark-border" style="height: 500px; position: relative;">
+                        <div id="vmDisplayPlaceholder" class="flex items-center justify-center h-full text-dark-text2">
+                            <div class="text-center">
+                                <div class="text-4xl mb-2">🖥️</div>
+                                <p>VM sa načítava...</p>
+                            </div>
+                        </div>
+                        <iframe id="vmDisplayFrame" class="hidden w-full h-full border-0" src=""></iframe>
+                    </div>
+                </div>
+
+                <!-- VM Output/Log -->
+                <div class="mt-6 bg-dark-surface rounded-lg p-4 border border-dark-border">
+                    <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-dark-border">Výstup VM</h3>
+                    <div id="vmOutput" class="bg-dark-bg rounded p-3 font-mono text-xs h-48 overflow-y-auto">
+                        <div class="text-dark-text2">Žiadny výstup...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[900px] max-h-[90vh] overflow-y-auto border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold">Nastavenia</h2>
+                <button id="btnCloseSettings" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <form id="settingsForm" class="space-y-6">
+                <!-- QEMU Settings -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">QEMU Konfigurácia</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Cesta k QEMU (prázdne = systémový PATH):</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="settingQemuPath" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" placeholder="C:\\Program Files\\qemu\\qemu-system-x86_64.exe">
+                            <button type="button" id="btnBrowseQemu" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                        <p class="text-xs text-dark-text2 mt-1">Ak je QEMU v systémovom PATH, nechajte prázdne</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">QEMU Architektúra:</label>
+                        <select id="settingQemuArch" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="x86_64">x86_64 (64-bit)</option>
+                            <option value="i386">i386 (32-bit)</option>
+                            <option value="arm">ARM</option>
+                            <option value="aarch64">AArch64</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Default VM Settings -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Predvolené nastavenia pre nové VM</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm mb-2">Predvolená RAM (MB):</label>
+                            <input type="number" id="settingDefaultMemory" value="2048" min="256" step="256" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-2">Predvolený počet CPU jadier:</label>
+                            <input type="number" id="settingDefaultCPU" value="2" min="1" max="32" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Predvolený typ siete:</label>
+                        <select id="settingDefaultNetwork" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="user">User Mode (NAT)</option>
+                            <option value="bridge">Bridge</option>
+                            <option value="none">Žiadna</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Predvolený VNC Port:</label>
+                        <input type="number" id="settingDefaultVNCPort" value="0" min="0" max="65535" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                        <p class="text-xs text-dark-text2 mt-1">0 = automatické pridelenie</p>
+                    </div>
+                </div>
+
+                <!-- Paths -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Cesty</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Priečinok pre VM konfigurácie:</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="settingVMDir" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" readonly>
+                            <button type="button" id="btnBrowseVMDir" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Predvolený priečinok pre disk images:</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="settingDiskImageDir" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <button type="button" id="btnBrowseDiskImageDir" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Predvolený priečinok pre ISO súbory:</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="settingISODir" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <button type="button" id="btnBrowseISODir" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced QEMU Options -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Pokročilé QEMU možnosti</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Dodatočné QEMU argumenty (pre všetky VM):</label>
+                        <textarea id="settingQemuExtraArgs" rows="3" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent font-mono text-sm" placeholder="-enable-kvm -cpu host"></textarea>
+                        <p class="text-xs text-dark-text2 mt-1">Jeden argument na riadok alebo oddelené medzerami. Tieto argumenty sa pridajú ku každému spustenému VM.</p>
+                        <p class="text-xs text-dark-text2 mt-1">Príklady: <code class="bg-dark-bg px-1 rounded">-enable-kvm</code>, <code class="bg-dark-bg px-1 rounded">-cpu host</code>, <code class="bg-dark-bg px-1 rounded">-machine type=q35</code></p>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Zobraziť QEMU argumenty pri spustení VM:</label>
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" id="settingShowQemuArgs" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Zobraziť použité QEMU argumenty v konzole VM</span>
+                        </label>
+                        <p class="text-xs text-dark-text2 mt-1">Ak je zapnuté, zobrazí sa kompletný QEMU príkaz s argumentmi pri spustení VM</p>
+                    </div>
+                    <div>
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" id="settingAutoStartVNC" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Automaticky spustiť VNC server pri spustení VM</span>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" id="settingShowQemuOutput" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Zobraziť QEMU výstup v konzole</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Application Settings -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Nastavenia aplikácie</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Jazyk:</label>
+                        <select id="settingLanguage" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="sk">Slovenčina</option>
+                            <option value="en">English</option>
+                            <option value="cs">Čeština</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" id="settingStartMinimized" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Spustiť aplikáciu minimalizovanú</span>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" id="settingMinimizeToTray" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Minimalizovať do systémovej lišty</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex justify-between pt-4 border-t border-dark-border">
+                    <button type="button" id="btnResetSettings" class="px-6 py-2 bg-yellow-600 hover:bg-yellow-700 rounded font-medium">
+                        Obnoviť predvolené
+                    </button>
+                    <div class="flex space-x-3">
+                        <button type="button" id="btnCancelSettings" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                            Zrušiť
+                        </button>
+                        <button type="submit" class="px-6 py-2 bg-dark-accent hover:bg-dark-accentHover rounded font-medium">
+                            Uložiť nastavenia
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- New/Edit VM Modal -->
+<div id="newVMModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[800px] max-h-[90vh] overflow-y-auto border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 id="vmModalTitle" class="text-2xl font-bold">Nová virtuálna mašina</h2>
+                <button id="btnCloseModal" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <form id="vmForm" class="space-y-6">
+                <input type="hidden" id="inputVMId" value="">
+                <!-- Basic Info -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Základné informácie</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Názov VM:</label>
+                        <input type="text" id="inputVMName" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Typ OS:</label>
+                        <select id="inputVMType" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="linux">Linux</option>
+                            <option value="windows">Windows</option>
+                            <option value="android">🤖 Android</option>
+                            <option value="macos">macOS</option>
+                            <option value="other">Iné</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- System Resources -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Systémové zdroje</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm mb-2">RAM (MB):</label>
+                            <input type="number" id="inputMemory" value="2048" min="256" step="256" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-2">CPU jadrá:</label>
+                            <input type="number" id="inputCPU" value="2" min="1" max="8" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Storage -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Úložisko</h3>
+                    <div>
+                        <label class="flex items-center space-x-2 mb-2">
+                            <input type="checkbox" id="inputCreateDisk" class="w-4 h-4 text-dark-accent bg-dark-surface2 border-dark-border rounded focus:ring-dark-accent">
+                            <span class="text-sm">Automaticky vytvoriť nový disk</span>
+                        </label>
+                        <div id="diskCreationOptions" class="ml-6 mt-2 space-y-2 hidden">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-dark-text2 mb-1">Veľkosť disku (GB):</label>
+                                    <input type="number" id="inputDiskSize" value="20" min="1" max="1024" step="1" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-dark-text2 mb-1">Formát:</label>
+                                    <select id="inputDiskFormat" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                                        <option value="qcow2">QCOW2 (odporúčané)</option>
+                                        <option value="raw">RAW</option>
+                                        <option value="vdi">VDI</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <p class="text-xs text-dark-text2">Disk bude vytvorený v predvolenom priečinku pre disk images</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Disk Image:</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="inputDiskImage" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" placeholder="Cesta k disk image súboru alebo nechajte prázdne pre auto-vytvorenie">
+                            <button type="button" id="btnBrowseDisk" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                        <p class="text-xs text-dark-text2 mt-1">Ak je začiarknuté "Automaticky vytvoriť nový disk", tento súbor bude vytvorený automaticky</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">CD/DVD Image (voliteľné):</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="inputCDROM" class="flex-1 px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" placeholder="Cesta k ISO súboru">
+                            <button type="button" id="btnBrowseCDROM" class="px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded">Prehľadať</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Sieť</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Typ siete:</label>
+                        <select id="inputNetworkType" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="user">User Mode (NAT)</option>
+                            <option value="bridge">Bridge</option>
+                            <option value="none">Žiadna</option>
+                        </select>
+                    </div>
+                    <div id="networkBridgeGroup" class="hidden">
+                        <label class="block text-sm mb-2">Bridge Interface:</label>
+                        <input type="text" id="inputNetworkBridge" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" placeholder="eth0">
+                    </div>
+                </div>
+
+                <!-- Display -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Zobrazenie</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Režim zobrazenia:</label>
+                        <select id="inputDisplayMode" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="none">Žiadne (headless)</option>
+                            <option value="gui">GUI (samostatné okno, bez VNC)</option>
+                            <option value="vnc">VNC (externý klient)</option>
+                            <option value="embedded">VNC (v aplikácii)</option>
+                            <option value="sdl">SDL (samostatné okno)</option>
+                        </select>
+                        <p class="text-xs text-dark-text2 mt-1">GUI otvorí samostatné okno bez VNC. VNC v aplikácii zobrazí VM priamo v aplikácii.</p>
+                    </div>
+                    <div id="vncPortGroup">
+                        <label class="block text-sm mb-2">VNC Port:</label>
+                        <input type="number" id="inputVNCPort" value="0" min="0" max="65535" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                        <p class="text-xs text-dark-text2 mt-1">0 = automatické pridelenie (iba pre VNC režimy)</p>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex justify-end space-x-3 pt-4 border-t border-dark-border">
+                    <button type="button" id="btnCancelVM" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                        Zrušiť
+                    </button>
+                    <button type="submit" id="btnSubmitVM" class="px-6 py-2 bg-dark-accent hover:bg-dark-accentHover rounded font-medium">
+                        Vytvoriť VM
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- VirtIO Drivers Download Modal -->
+<div id="virtioDownloadModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[600px] border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold">Stiahnuť VirtIO ovladače</h2>
+                <button id="btnCloseVirtioModal" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm mb-2">Verzia ovladačov:</label>
+                    <select id="virtioVersion" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                        <option value="latest">Najnovšia verzia (odporúčané)</option>
+                        <option value="0.1.240">0.1.240</option>
+                        <option value="0.1.229">0.1.229</option>
+                    </select>
+                </div>
+
+                <div id="virtioDownloadProgress" class="hidden space-y-2">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Sťahovanie VirtIO ovladačov</h3>
+                    <div class="bg-dark-surface2 rounded p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm" id="virtioDownloadStatus">Pripravuje sa sťahovanie...</span>
+                            <span class="text-sm font-medium" id="virtioDownloadPercent">0%</span>
+                        </div>
+                        <div class="w-full bg-dark-bg rounded-full h-2">
+                            <div id="virtioDownloadBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p class="text-xs text-dark-text2 mt-2" id="virtioDownloadSpeed">-</p>
+                    </div>
+                </div>
+
+                <div class="bg-blue-900 bg-opacity-20 border border-blue-600 rounded p-3">
+                    <p class="text-sm text-blue-200">
+                        <strong>Poznámka:</strong> Po stiahnutí sa VirtIO ISO automaticky pripojí k VM ako CD/DVD.
+                        V Windows VM otvorte tento disk a nainštalujte ovladače pre lepší výkon.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-4 mt-6 border-t border-dark-border">
+                <button type="button" id="btnCancelVirtio" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                    Zrušiť
+                </button>
+                <button type="button" id="btnDownloadVirtioConfirm" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium">
+                    Stiahnuť a pripojiť
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Resize Disk Modal -->
+<div id="resizeDiskModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[500px] border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold">Zmeniť veľkosť disku</h2>
+                <button id="btnCloseResizeModal" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm mb-2">Súčasná veľkosť:</label>
+                    <div id="resizeCurrentSize" class="text-base font-medium">-</div>
+                </div>
+                <div>
+                    <label class="block text-sm mb-2">Nová veľkosť (GB):</label>
+                    <input type="number" id="resizeNewSize" min="1" max="2048" step="1" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                    <p class="text-xs text-dark-text2 mt-1">Poznámka: Môžete iba zväčšiť disk. Zmenšenie nie je podporované.</p>
+                </div>
+                <div id="resizeProgress" class="hidden">
+                    <div class="bg-dark-surface2 rounded p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm" id="resizeStatus">Pripravuje sa...</span>
+                        </div>
+                        <div class="w-full bg-dark-bg rounded-full h-2">
+                            <div id="resizeBar" class="bg-green-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-4 mt-6 border-t border-dark-border">
+                <button type="button" id="btnCancelResize" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                    Zrušiť
+                </button>
+                <button type="button" id="btnConfirmResize" class="px-6 py-2 bg-dark-accent hover:bg-dark-accentHover rounded font-medium">
+                    Zmeniť veľkosť
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- About Modal -->
+<div id="aboutModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[600px] border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold">O aplikácii</h2>
+                <button id="btnCloseAboutModal" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <div class="text-center">
+                    <div class="text-5xl mb-4">🖥️</div>
+                    <h3 class="text-xl font-bold mb-2">AnubisQemuControl</h3>
+                    <p class="text-sm text-dark-text2 mb-4">Modern QEMU Control Tool</p>
+                </div>
+
+                <div class="bg-dark-surface2 rounded-lg p-4 space-y-3">
+                    <div>
+                        <label class="text-sm text-dark-text2">Verzia:</label>
+                        <div id="aboutVersion" class="text-base font-medium">1.0.0</div>
+                    </div>
+                    <div>
+                        <label class="text-sm text-dark-text2">Autor:</label>
+                        <div class="text-base font-medium">AnubisSVK</div>
+                    </div>
+                    <div>
+                        <label class="text-sm text-dark-text2">GitHub:</label>
+                        <div class="text-base">
+                            <a id="aboutGitHubLink" href="https://github.com/AnubisSK/AnubisQemuControl" target="_blank" class="text-dark-accent hover:text-dark-accentHover underline">
+                                https://github.com/AnubisSK/AnubisQemuControl
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="updateCheckSection" class="space-y-3">
+                    <div id="updateStatus" class="hidden bg-dark-surface2 rounded p-3">
+                        <div id="updateStatusText" class="text-sm"></div>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button id="btnCheckUpdate" class="flex-1 px-4 py-2 bg-dark-accent hover:bg-dark-accentHover rounded text-sm font-medium">
+                            🔄 Skontrolovať aktualizácie
+                        </button>
+                        <button id="btnOpenGitHub" class="flex-1 px-4 py-2 bg-dark-surface2 hover:bg-dark-border rounded text-sm">
+                            📂 Otvoriť GitHub
+                        </button>
+                    </div>
+                    <div id="updateDownloadSection" class="hidden space-y-2">
+                        <div class="bg-blue-900 bg-opacity-20 border border-blue-600 rounded p-3">
+                            <p class="text-sm text-blue-200 mb-2">
+                                <strong>Nova verzia je dostupná!</strong>
+                            </p>
+                            <p id="updateInfo" class="text-xs text-blue-200 mb-3"></p>
+                            <a id="btnDownloadUpdate" href="#" target="_blank" class="block w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium text-center text-white">
+                                📥 Stiahnuť najnovšiu verziu
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-dark-border">
+                    <p class="text-xs text-dark-text2 text-center">
+                        AnubisQemuControl - Modern QEMU Control Tool<br>
+                        © 2025 AnubisSVK. Všetky práva vyhradené.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-4 mt-6 border-t border-dark-border">
+                <button type="button" id="btnCloseAbout" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                    Zavrieť
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Android VM Creation Modal -->
+<div id="androidVMModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-dark-surface rounded-lg w-[800px] max-h-[90vh] overflow-y-auto border border-dark-border">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold">🤖 Vytvoriť Android VM</h2>
+                <button id="btnCloseAndroidModal" class="text-dark-text2 hover:text-dark-text text-2xl">&times;</button>
+            </div>
+
+            <form id="androidVMForm" class="space-y-6">
+                <!-- Basic Info -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Základné informácie</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Názov VM:</label>
+                        <input type="text" id="androidVMName" value="Android VM" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Verzia Android:</label>
+                        <select id="androidVersion" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="android-x86-latest">Android-x86 (Najnovšia verzia) - Odporúčané</option>
+                            <option value="android-x86-9.0">Android-x86 9.0 (Pie)</option>
+                            <option value="android-x86-8.1">Android-x86 8.1 (Oreo)</option>
+                            <option value="android-x86-7.1">Android-x86 7.1 (Nougat)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- System Resources -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Systémové zdroje</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm mb-2">RAM (MB):</label>
+                            <input type="number" id="androidMemory" value="4096" min="2048" step="512" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                            <p class="text-xs text-dark-text2 mt-1">Odporúčané: 4096 MB alebo viac</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-2">CPU jadrá:</label>
+                            <input type="number" id="androidCPU" value="2" min="1" max="8" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-2">Veľkosť disku (GB):</label>
+                        <input type="number" id="androidDiskSize" value="16" min="8" max="128" step="4" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent" required>
+                        <p class="text-xs text-dark-text2 mt-1">Odporúčané: 16 GB alebo viac</p>
+                    </div>
+                </div>
+
+                <!-- Acceleration -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Akcelerácia</h3>
+                    <div>
+                        <label class="block text-sm mb-2">Typ akcelerácie:</label>
+                        <select id="androidAcceleration" class="w-full px-3 py-2 bg-dark-surface2 border border-dark-border rounded focus:outline-none focus:border-dark-accent">
+                            <option value="auto">Automaticky (odporúčané)</option>
+                            <option value="kvm">KVM (Linux)</option>
+                            <option value="haxm">HAXM (Windows/macOS)</option>
+                            <option value="tcg">TCG (softvérová emulácia)</option>
+                        </select>
+                        <p class="text-xs text-dark-text2 mt-1">KVM/HAXM poskytuje lepší výkon, ale vyžaduje hardvérovú podporu</p>
+                    </div>
+                </div>
+
+                <!-- Download Progress -->
+                <div id="androidDownloadProgress" class="hidden space-y-2">
+                    <h3 class="text-lg font-semibold pb-2 border-b border-dark-border">Sťahovanie Android ISO</h3>
+                    <div class="bg-dark-surface2 rounded p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm" id="androidDownloadStatus">Pripravuje sa sťahovanie...</span>
+                            <span class="text-sm font-medium" id="androidDownloadPercent">0%</span>
+                        </div>
+                        <div class="w-full bg-dark-bg rounded-full h-2">
+                            <div id="androidDownloadBar" class="bg-green-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p class="text-xs text-dark-text2 mt-2" id="androidDownloadSpeed">-</p>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex justify-end space-x-3 pt-4 border-t border-dark-border">
+                    <button type="button" id="btnCancelAndroidVM" class="px-6 py-2 bg-dark-surface2 hover:bg-dark-border rounded">
+                        Zrušiť
+                    </button>
+                    <button type="submit" id="btnCreateAndroidVM" class="px-6 py-2 bg-green-600 hover:bg-green-700 rounded font-medium">
+                        Vytvoriť Android VM
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="./src/renderer.js"></script>
+</body>
+</html>
+
