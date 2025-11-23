@@ -83,3 +83,10 @@ MIT
 - Pre najlepšiu kompatibilitu použite QEMU 6.0 alebo novšie
 - VM konfigurácie sa ukladajú v `%APPDATA%/AnubisQemuControll/vms/`
 
+## Obrazky
+
+
+
+<img width="1413" height="908" alt="Snímka obrazovky 2025-11-23 o 18 03 09" src="https://github.com/user-attachments/assets/51a6c93d-ed22-4fc5-801c-2336f156d661" />
+<img width="1413" height="908" alt="Snímka obrazovky 2025-11-23 o 18 02 51" src="https://github.com/user-attachments/assets/c01160fd-d770-4190-b6ae-b8916b0e7b77" />
+<img width="1413" height="908" alt="Snímka obrazovky 2025-11-23 o 18 02 13" src="https://github.com/user-attachments/assets/9b173aae-4c7b-4e06-bca2-77ecf076dd0b" />
