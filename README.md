@@ -81,7 +81,7 @@ MIT
 
 - Uistite sa, že QEMU je správne nainštalované a dostupné v systémovom PATH
 - Pre najlepšiu kompatibilitu použite QEMU 6.0 alebo novšie
-- VM konfigurácie sa ukladajú v `%APPDATA%/AnubisQemuControll/vms/`
+- VM konfigurácie sa ukladajú v `%APPDATA%/AnubisQemuControl/vms/`
 
 ## Obrazky
 
