@@ -36,6 +36,7 @@ if (typeof require === 'undefined') {
       document.getElementById('settingLanguage').value = appSettings.language || 'sk';
       document.getElementById('settingStartMinimized').checked = appSettings.startMinimized || false;
       document.getElementById('settingMinimizeToTray').checked = appSettings.minimizeToTray || false;
+      document.getElementById('settingDisableWHPX').checked = appSettings.disableWHPX || false;
     }
 
     // Check QEMU installation
@@ -980,7 +981,8 @@ if (typeof require === 'undefined') {
         showQemuArgs: document.getElementById('settingShowQemuArgs').checked,
         language: document.getElementById('settingLanguage').value,
         startMinimized: document.getElementById('settingStartMinimized').checked,
-        minimizeToTray: document.getElementById('settingMinimizeToTray').checked
+        minimizeToTray: document.getElementById('settingMinimizeToTray').checked,
+        disableWHPX: document.getElementById('settingDisableWHPX').checked
       };
 
       const result = await ipcRenderer.invoke('save-settings', settings);
@@ -1072,6 +1074,25 @@ if (typeof require === 'undefined') {
         currentVM.running = false;
         await updateVMDetails(currentVM);
         updateToolbarButtons(false);
+      }
+
+      await loadVMs(); // Reload to update all VM statuses
+    });
+
+    // Listen for VM errors
+    ipcRenderer.on('vm-error', async (event, data) => {
+      const vm = vms.find(v => v.id === data.id);
+      if (vm) {
+        vm.running = false;
+      }
+
+      if (currentVM && currentVM.id === data.id) {
+        currentVM.running = false;
+        await updateVMDetails(currentVM);
+        updateToolbarButtons(false);
+        
+        // Show error message
+        alert(`Chyba pri spustení VM:\n\n${data.error}\n\nSkontrolujte výstup VM pre viac detailov.`);
       }
 
       await loadVMs(); // Reload to update all VM statuses

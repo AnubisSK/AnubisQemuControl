@@ -75,7 +75,7 @@ Výsledné súbory budú v priečinku `dist/`.
 
 ## Licencia
 
-MIT
+Tento projekt je licencovaný pod [MIT licenciou](LICENSE).
 
 ## Poznámky
 

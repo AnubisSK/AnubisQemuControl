@@ -50,7 +50,8 @@ const defaultSettings = {
   showQemuArgs: false,
   language: 'sk',
   startMinimized: false,
-  minimizeToTray: false
+  minimizeToTray: false,
+  disableWHPX: false // Option to disable WHPX acceleration (use TCG instead)
 };
 
 // Load settings
@@ -238,15 +239,9 @@ ipcMain.handle('delete-vm', async (event, vmId) => {
   return { success: false, error: 'VM not found' };
 });
 
-// Start VM
-ipcMain.handle('start-vm', async (event, vmConfig) => {
+// Start VM with optional acceleration override (for fallback)
+function startVMProcess(vmConfig, accelerationOverride = null) {
   return new Promise((resolve, reject) => {
-    // Check if VM is already running
-    if (qemuProcesses.has(vmConfig.id)) {
-      reject({ success: false, error: 'VM is already running' });
-      return;
-    }
-
     // Determine display mode
     const displayMode = vmConfig.display?.mode || (appSettings?.autoStartVNC ? 'vnc' : 'none');
 
@@ -275,16 +270,25 @@ ipcMain.handle('start-vm', async (event, vmConfig) => {
       vnc: vncPort ? {
         ...vmConfig.vnc,
         port: vncPort
-      } : vmConfig.vnc
+      } : vmConfig.vnc,
+      // Override acceleration if specified (for fallback)
+      _accelerationOverride: accelerationOverride
     };
 
     const args = buildQemuArgs(vmConfigWithPort);
     const arch = appSettings?.qemuArch || 'x86_64';
     const qemuPath = appSettings?.qemuPath || `qemu-system-${arch}`;
 
-    const qemuProcess = spawn(qemuPath, args, {
-      stdio: appSettings?.showQemuOutput ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'ignore']
-    });
+    // Optimize spawn options for faster startup
+    const spawnOptions = {
+      stdio: appSettings?.showQemuOutput ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'ignore'],
+      // Detach process for faster startup (Windows)
+      detached: false,
+      // Set higher priority on Windows for better performance
+      ...(process.platform === 'win32' && { windowsHide: false })
+    };
+
+    const qemuProcess = spawn(qemuPath, args, spawnOptions);
 
     qemuProcesses.set(vmConfig.id, qemuProcess);
     if (vncPort) {
@@ -299,22 +303,97 @@ ipcMain.handle('start-vm', async (event, vmConfig) => {
       startTime: Date.now()
     });
 
+    // Track WHPX errors for automatic fallback
+    let whpxErrorDetected = false;
+    let stderrBuffer = '';
+    let isRetrying = false; // Prevent multiple retries
+
     qemuProcess.on('error', (error) => {
+      if (!isRetrying) {
       qemuProcesses.delete(vmConfig.id);
       if (vncPort) {
         usedVNCPorts.delete(vncPort);
       }
       vmProcessInfo.delete(vmConfig.id);
       reject({ success: false, error: error.message });
+      }
     });
 
     qemuProcess.on('exit', (code) => {
+      // If WHPX failed (either at startup or runtime) and we haven't tried TCG yet, retry with TCG
+      // Check for both non-zero exit codes and WHPX errors detected during runtime
+      if (whpxErrorDetected && !accelerationOverride && !isRetrying) {
+        isRetrying = true;
+        
+        // Increment WHPX failure count
+        if (process.platform === 'win32' && !accelerationOverride) {
+          whpxFailureCount++;
+          
+          // If WHPX failed multiple times, suggest disabling it
+          if (whpxFailureCount >= MAX_WHPX_FAILURES && !appSettings?.disableWHPX) {
+            mainWindow.webContents.send('vm-output', {
+              id: vmConfig.id,
+              output: `\n⚠️ WHPX zlyhalo ${whpxFailureCount}x. Odporúčame vypnúť WHPX v nastaveniach aplikácie.\n`
+            });
+          }
+        }
+        
+        // Clean up failed process
       qemuProcesses.delete(vmConfig.id);
       if (vncPort) {
         usedVNCPorts.delete(vncPort);
       }
       vmProcessInfo.delete(vmConfig.id);
+        
+        // Don't clear acceleration cache here - we want to track failures
+        // Only clear it when we successfully start with TCG
+        
+        // Retry with TCG (software emulation) - wait a bit for stderr to finish processing
+        setTimeout(() => {
+          const retryMessage = code === 0 || code === null
+            ? '\n⚠️ WHPX runtime chyba detekovaná. Reštartujem VM s TCG...\n'
+            : '\n⚠️ WHPX akcelerácia zlyhala. Prepínam na softvérovú emuláciu (TCG)...\n';
+          
+          mainWindow.webContents.send('vm-output', {
+            id: vmConfig.id,
+            output: retryMessage
+          });
+          
+          // Retry with TCG
+          startVMProcess(vmConfig, 'tcg')
+            .then(result => {
+              // Successfully started with TCG - clear cache and reset failure count
+              clearAccelerationCache();
+              whpxFailureCount = 0;
+              resolve(result);
+            })
+            .catch(err => {
+              reject(err);
+            });
+        }, 1000); // Longer delay for runtime errors to ensure cleanup
+        return;
+      }
+      
+      // Only send vm-stopped if we're not retrying
+      if (!isRetrying) {
+        qemuProcesses.delete(vmConfig.id);
+        if (vncPort) {
+          usedVNCPorts.delete(vncPort);
+        }
+        vmProcessInfo.delete(vmConfig.id);
+        
+        // If process exited immediately with non-zero code, it's likely an error
+        if (code !== 0 && code !== null) {
+          const errorMsg = `QEMU proces sa ukončil s kódom ${code}. Skontrolujte výstup VM pre detaily.`;
+          mainWindow.webContents.send('vm-error', {
+            id: vmConfig.id,
+            error: errorMsg,
+            code: code
+          });
+        }
+        
       mainWindow.webContents.send('vm-stopped', vmConfig.id);
+      }
     });
 
     // Send QEMU command info if enabled
@@ -327,15 +406,77 @@ ipcMain.handle('start-vm', async (event, vmConfig) => {
     }
 
     // Send output to renderer
+    // Always capture stderr to detect errors, even if showQemuOutput is disabled
+    qemuProcess.stderr.on('data', (data) => {
+      const errorOutput = data.toString();
+      stderrBuffer += errorOutput;
+      
+      // Check for WHPX initialization errors (various error messages)
+      if (errorOutput.includes('-accel whpx') || errorOutput.includes('WHPX')) {
+        if (errorOutput.includes('failed to initialize') || 
+            errorOutput.includes('No space left on device') ||
+            errorOutput.includes('No accelerator found') ||
+            errorOutput.includes('not supported') ||
+            errorOutput.includes('hr=') || // Windows error codes
+            errorOutput.includes('failed to initialize whpx')) {
+          whpxErrorDetected = true;
+        }
+      }
+      
+      // Check for WHPX runtime errors (occur during VM execution)
+      // These indicate WHPX is not compatible and we should switch to TCG
+      if (errorOutput.includes('WHPX') || errorOutput.includes('whpx:')) {
+        if (errorOutput.includes('injection failed') ||
+            errorOutput.includes('Unexpected VP exit') ||
+            errorOutput.includes('MSI') && errorOutput.includes('delivery') ||
+            errorOutput.includes('VP exit code')) {
+          whpxErrorDetected = true;
+          
+          // If VM is already running, we need to restart it with TCG
+          if (!accelerationOverride && qemuProcesses.has(vmConfig.id) && !isRetrying) {
+            mainWindow.webContents.send('vm-output', {
+              id: vmConfig.id,
+              output: '\n⚠️ WHPX runtime chyba detekovaná. Reštartujem VM s TCG...\n'
+            });
+            
+            // Stop current VM gracefully - exit handler will trigger retry
+            // Don't set isRetrying here - let exit handler handle it
+            setTimeout(() => {
+              const process = qemuProcesses.get(vmConfig.id);
+              if (process && whpxErrorDetected) {
+                process.kill('SIGTERM');
+                // Clean up will happen in exit handler, which will trigger retry
+              }
+            }, 500);
+          }
+        }
+      }
+      
+      // Check for common QEMU errors
+      if (errorOutput.includes('failed to initialize') || 
+          errorOutput.includes('not supported') ||
+          errorOutput.includes('cannot find') ||
+          errorOutput.includes('error:')) {
+        // Send error to renderer (but don't reject yet if it's WHPX - we'll retry)
+        if (!whpxErrorDetected || accelerationOverride === 'tcg') {
+          mainWindow.webContents.send('vm-error', {
+            id: vmConfig.id,
+            error: `QEMU chyba: ${errorOutput.substring(0, 200)}`,
+            stderr: stderrBuffer
+          });
+        }
+      }
+      
     if (appSettings?.showQemuOutput) {
-      qemuProcess.stdout.on('data', (data) => {
         mainWindow.webContents.send('vm-output', {
           id: vmConfig.id,
-          output: data.toString()
+          output: errorOutput
         });
+      }
       });
 
-      qemuProcess.stderr.on('data', (data) => {
+    if (appSettings?.showQemuOutput) {
+      qemuProcess.stdout.on('data', (data) => {
         mainWindow.webContents.send('vm-output', {
           id: vmConfig.id,
           output: data.toString()
@@ -365,6 +506,17 @@ ipcMain.handle('start-vm', async (event, vmConfig) => {
       qemuCommand: fullCommand
     });
   });
+}
+
+// Start VM
+ipcMain.handle('start-vm', async (event, vmConfig) => {
+  // Check if VM is already running
+  if (qemuProcesses.has(vmConfig.id)) {
+    return Promise.reject({ success: false, error: 'VM is already running' });
+  }
+
+  // Start VM process (will auto-retry with TCG if WHPX fails)
+  return startVMProcess(vmConfig);
 });
 
 // Stop VM
@@ -417,6 +569,68 @@ ipcMain.handle('get-running-vms', async () => {
   return runningVMs;
 });
 
+// Cache for acceleration detection to avoid repeated checks
+let accelerationCache = null;
+// Track WHPX failures to potentially disable it automatically
+let whpxFailureCount = 0;
+const MAX_WHPX_FAILURES = 3; // Disable WHPX after 3 failures
+
+// Detect available acceleration (cached)
+// QEMU will automatically fallback if the selected acceleration is not available
+function detectAcceleration() {
+  // Check if WHPX is disabled in settings FIRST (before checking cache)
+  if (appSettings?.disableWHPX && process.platform === 'win32') {
+    // Clear cache if WHPX is disabled to ensure TCG is used
+    accelerationCache = null;
+    return 'tcg';
+  }
+
+  if (accelerationCache !== null) {
+    return accelerationCache;
+  }
+
+  // Try to detect available acceleration based on platform
+  // On Windows: try whpx (Windows Hypervisor Platform) - built-in, no extra drivers needed
+  // On Linux: try kvm (requires KVM kernel module)
+  // On macOS: try hvf (Hypervisor Framework) - built-in
+  
+  if (process.platform === 'win32') {
+    // Windows: prefer whpx (Windows Hypervisor Platform) as it's built-in since Windows 10
+    // QEMU will automatically fallback to tcg if whpx is not available
+    // But WHPX can have issues (MSI injection failures), so user can disable it
+    // Check disableWHPX setting again before caching (in case it was changed)
+    if (appSettings?.disableWHPX) {
+      accelerationCache = 'tcg';
+    } else {
+      accelerationCache = 'whpx';
+    }
+  } else if (process.platform === 'linux') {
+    // Linux: try kvm (requires KVM kernel module and /dev/kvm access)
+    // QEMU will automatically fallback to tcg if kvm is not available
+    accelerationCache = 'kvm';
+  } else if (process.platform === 'darwin') {
+    // macOS: use hvf (Hypervisor Framework) - built-in since macOS 10.10
+    accelerationCache = 'hvf';
+  } else {
+    // Fallback to tcg (software emulation) - slower but always works
+    accelerationCache = 'tcg';
+  }
+
+  return accelerationCache;
+}
+
+// Clear acceleration cache (call when QEMU path or settings change)
+function clearAccelerationCache() {
+  accelerationCache = null;
+  // Reset WHPX failure count when settings change or cache is cleared
+  whpxFailureCount = 0;
+  
+  // If WHPX is disabled, set cache to TCG immediately
+  if (appSettings?.disableWHPX && process.platform === 'win32') {
+    accelerationCache = 'tcg';
+  }
+}
+
 // Find available VNC port
 function findAvailableVNCPort(startPort = 5900) {
   let port = startPort;
@@ -448,28 +662,87 @@ function buildQemuArgs(vmConfig) {
   const args = [];
   const isAndroid = vmConfig.type === 'android';
 
+  // Performance optimizations: Add acceleration FIRST (before other options)
+  // This significantly speeds up VM startup and execution
+  let selectedAccel = 'tcg'; // Default fallback
+  
+  // Check for acceleration override (used for fallback when WHPX/KVM fails)
+  const accelerationOverride = vmConfig._accelerationOverride;
+  
+  if (isAndroid && vmConfig.android) {
+    // Android-specific acceleration
+    const acceleration = accelerationOverride || vmConfig.android.acceleration || 'auto';
+    if (acceleration === 'kvm') {
+      selectedAccel = 'kvm';
+      args.push('-accel', 'kvm');
+    } else if (acceleration === 'haxm') {
+      selectedAccel = 'haxm';
+      args.push('-accel', 'haxm');
+    } else if (acceleration === 'auto') {
+      // Auto-detect acceleration for Android (unless overridden)
+      selectedAccel = accelerationOverride || detectAcceleration();
+      args.push('-accel', selectedAccel);
+    } else {
+      selectedAccel = 'tcg';
+      args.push('-accel', 'tcg');
+    }
+  } else {
+    // For non-Android VMs, enable acceleration automatically
+    // Use override if provided (for fallback), otherwise detect
+    selectedAccel = accelerationOverride || detectAcceleration();
+    if (selectedAccel !== 'tcg') {
+      args.push('-accel', selectedAccel);
+    } else {
+      // Even for TCG, we can specify it explicitly
+      args.push('-accel', 'tcg');
+    }
+  }
+
+  // Machine type: q35 is faster and more modern than default pc
+  // Note: Don't add accel to machine type - it's already specified with -accel
+  // Some QEMU versions don't support accel in machine type
+  if (!isAndroid) {
+    args.push('-machine', 'type=q35');
+  }
+
   // Memory
   if (vmConfig.memory) {
     args.push('-m', vmConfig.memory.toString());
   }
 
-  // CPU
+  // CPU: Use host CPU features for better performance if acceleration is available
+  // Only use host CPU if we have hardware acceleration (not TCG)
+  // Some systems may not support host CPU, so we'll let QEMU handle fallback
+  if (selectedAccel !== 'tcg') {
+    // Try host CPU, but QEMU will fallback if not supported
+    args.push('-cpu', 'host');
+  }
+
+  // CPU cores
   if (vmConfig.cpus) {
     args.push('-smp', vmConfig.cpus.toString());
   }
 
-  // Disk image
+  // Disk image - optimize for performance
   if (vmConfig.diskImage) {
     if (isAndroid) {
       // Use virtio-blk for Android for better performance
-      args.push('-drive', `file=${vmConfig.diskImage},if=virtio,format=qcow2`);
+      args.push('-drive', `file=${vmConfig.diskImage},if=virtio,format=qcow2,cache=writeback`);
     } else if (vmConfig.virtioDrivers && vmConfig.virtioDrivers.attached) {
       // Use virtio-blk if VirtIO drivers are attached (better performance)
       // Detect disk format
       const diskFormat = vmConfig.diskImage.endsWith('.qcow2') ? 'qcow2' : 'raw';
-      args.push('-drive', `file=${vmConfig.diskImage},if=virtio,format=${diskFormat}`);
+      args.push('-drive', `file=${vmConfig.diskImage},if=virtio,format=${diskFormat},cache=writeback`);
     } else {
+      // For compatibility, use -hda for simple cases, but try to detect format
+      // If file extension suggests qcow2, use -drive with format
+      if (vmConfig.diskImage.endsWith('.qcow2')) {
+        // Use -drive for qcow2 format (better support)
+        args.push('-drive', `file=${vmConfig.diskImage},format=qcow2,cache=writeback`);
+      } else {
+        // Use -hda for raw/other formats (more compatible)
       args.push('-hda', vmConfig.diskImage);
+      }
     }
   }
 
@@ -556,18 +829,8 @@ function buildQemuArgs(vmConfig) {
     }
   }
 
-  // Android-specific options
+  // Android-specific options (acceleration already added above)
   if (isAndroid && vmConfig.android) {
-    // Acceleration
-    const acceleration = vmConfig.android.acceleration || 'auto';
-    if (acceleration === 'kvm') {
-      args.push('-accel', 'kvm');
-    } else if (acceleration === 'haxm') {
-      args.push('-accel', 'haxm');
-    } else {
-      args.push('-accel', 'tcg');
-    }
-
     // Machine type for Android
     args.push('-machine', 'type=q35');
 
@@ -593,10 +856,28 @@ function buildQemuArgs(vmConfig) {
     });
   }
 
-  // Extra QEMU args from settings
+  // Extra QEMU args from settings (added last so they can override defaults)
+  // But filter out duplicate -accel arguments to avoid conflicts
   if (appSettings?.qemuExtraArgs) {
     const extraArgs = appSettings.qemuExtraArgs.trim().split(/\s+/).filter(arg => arg.length > 0);
-    args.push(...extraArgs);
+    
+    // Check if we already have an -accel argument
+    const hasAccel = args.includes('-accel');
+    
+    // Filter out -accel from extra args if we already have one
+    const filteredExtraArgs = [];
+    for (let i = 0; i < extraArgs.length; i++) {
+      if (extraArgs[i] === '-accel') {
+        // Skip -accel and its value if we already have one
+        if (hasAccel) {
+          i++; // Skip the value too
+          continue;
+        }
+      }
+      filteredExtraArgs.push(extraArgs[i]);
+    }
+    
+    args.push(...filteredExtraArgs);
   }
 
   return args;
@@ -645,6 +926,8 @@ ipcMain.handle('get-settings', async () => {
 
 ipcMain.handle('save-settings', async (event, settings) => {
   appSettings = { ...appSettings, ...settings };
+  // Clear acceleration cache when settings change (QEMU path might have changed)
+  clearAccelerationCache();
   return saveSettings();
 });
 
